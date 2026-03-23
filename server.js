@@ -9,39 +9,28 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const BOLD_API_KEY = process.env.BOLD_API_KEY;
 
-// Ruta de prueba
+// ✅ Ruta de prueba
 app.get("/", (req, res) => {
   res.send("Backend Kyoto funcionando 🚀");
 });
 
-// PRODUCTOS
-const productos = [
-  {
-    id: 1,
-    nombre: "Camiseta Kyoto Negra",
-    precio: 80000,
-    categoria: "Camisetas",
-    coleccion: "Drop 01",
-    tallas: ["S", "M", "L", "XL"],
-    imagen: "https://via.placeholder.com/300x400"
-  },
-  {
-    id: 2,
-    nombre: "Camiseta Kyoto Blanca",
-    precio: 80000,
-    categoria: "Camisetas",
-    coleccion: "Drop 01",
-    tallas: ["S", "M", "L"],
-    imagen: "https://via.placeholder.com/300x400"
-  }
-];
+// ✅ PRODUCTOS DESDE GOOGLE SHEETS (SIN MODIFICAR ESTRUCTURA)
+app.get("/productos", async (req, res) => {
+  try {
+    const response = await fetch("https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec");
 
-// ESTA RUTA SOLUCIONA TU ERROR
-app.get("/productos", (req, res) => {
-  res.json(productos);
+    const data = await response.json();
+
+    // 🔥 IMPORTANTE: devolvemos tal cual (para que tus tallas funcionen como antes)
+    res.json(data);
+
+  } catch (error) {
+    console.error("Error obteniendo productos:", error);
+    res.status(500).json({ error: "Error obteniendo productos" });
+  }
 });
 
-// CREAR PAGO
+// ✅ CREAR PAGO CON BOLD
 app.post("/crear-pago", async (req, res) => {
   try {
     const { carrito } = req.body;
@@ -71,11 +60,12 @@ app.post("/crear-pago", async (req, res) => {
     res.json({ urlPago: data.payment_url });
 
   } catch (error) {
-    console.error(error);
+    console.error("Error en pago:", error);
     res.status(500).json({ error: "Error creando pago" });
   }
 });
 
-app.listen(PORT, () => {
+// ✅ IMPORTANTE PARA RAILWAY
+app.listen(PORT, "0.0.0.0", () => {
   console.log("Servidor corriendo en puerto " + PORT);
 });
