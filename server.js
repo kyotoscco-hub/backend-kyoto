@@ -8,7 +8,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
-
+console.log("TOKEN MP:", MP_ACCESS_TOKEN);
 app.get("/", (req, res) => res.send("Backend Kyoto con Mercado Pago 🚀"));
 
 app.get("/productos", async (req, res) => {
