@@ -9,24 +9,19 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
-// ✅ Ruta de prueba
-app.get("/", (req, res) => {
-  res.send("Backend Kyoto con Mercado Pago 🚀");
-});
+app.get("/", (req, res) => res.send("Backend Kyoto con Mercado Pago 🚀"));
 
-// ✅ PRODUCTOS DESDE GOOGLE SHEETS
 app.get("/productos", async (req, res) => {
   try {
     const response = await fetch("https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec");
     const data = await response.json();
     res.json(data);
   } catch (error) {
-    console.error("Error obteniendo productos:", error);
+    console.error("Error productos:", error);
     res.status(500).json({ error: "Error obteniendo productos" });
   }
 });
 
-// 🔥 CREAR PREFERENCIA MERCADO PAGO
 app.post("/crear-preferencia", async (req, res) => {
   try {
     const { carrito, datosCliente } = req.body;
@@ -35,7 +30,6 @@ app.post("/crear-preferencia", async (req, res) => {
       return res.status(400).json({ error: "Carrito vacío" });
     }
 
-    // Validar token
     if (!MP_ACCESS_TOKEN) {
       console.error("❌ MP_ACCESS_TOKEN no configurado");
       return res.status(500).json({ error: "Token de Mercado Pago no configurado" });
@@ -48,7 +42,6 @@ app.post("/crear-preferencia", async (req, res) => {
       currency_id: "COP"
     }));
 
-    // Construir payload para Mercado Pago
     const preference = {
       items,
       payer: {
@@ -63,7 +56,7 @@ app.post("/crear-preferencia", async (req, res) => {
       auto_return: "approved"
     };
 
-    console.log("Enviando a MP:", JSON.stringify(preference, null, 2));
+    console.log("📤 Enviando a MP:", JSON.stringify(preference, null, 2));
 
     const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
       method: "POST",
@@ -77,23 +70,21 @@ app.post("/crear-preferencia", async (req, res) => {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Error respuesta MP:", data);
+      console.error("❌ Error MP:", data);
       return res.status(500).json({ error: data.message || "Error al crear preferencia", details: data });
     }
 
     if (!data.init_point) {
-      console.error("No init_point en respuesta:", data);
+      console.error("❌ No init_point:", data);
       return res.status(500).json({ error: "No se pudo crear el pago", details: data });
     }
 
     res.json({ init_point: data.init_point });
 
   } catch (error) {
-    console.error("Error en Mercado Pago:", error);
+    console.error("❌ Error en servidor:", error);
     res.status(500).json({ error: "Error creando preferencia", details: error.message });
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Servidor corriendo en puerto " + PORT);
-});
+app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en puerto ${PORT}`));
