@@ -7,21 +7,20 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const BOLD_API_KEY = process.env.BOLD_API_KEY;
+const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
 // ✅ Ruta de prueba
 app.get("/", (req, res) => {
-  res.send("Backend Kyoto funcionando 🚀");
+  res.send("Backend Kyoto con Mercado Pago 🚀");
 });
 
-// ✅ PRODUCTOS DESDE GOOGLE SHEETS (SIN MODIFICAR ESTRUCTURA)
+// ✅ PRODUCTOS DESDE GOOGLE SHEETS (SIN TOCAR)
 app.get("/productos", async (req, res) => {
   try {
     const response = await fetch("https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec");
 
     const data = await response.json();
 
-    // 🔥 IMPORTANTE: devolvemos tal cual (para que tus tallas funcionen como antes)
     res.json(data);
 
   } catch (error) {
@@ -30,38 +29,55 @@ app.get("/productos", async (req, res) => {
   }
 });
 
-// ✅ CREAR PAGO CON BOLD
-app.post("/crear-pago", async (req, res) => {
+// 🔥 CREAR PREFERENCIA MERCADO PAGO
+app.post("/crear-preferencia", async (req, res) => {
   try {
-    const { carrito } = req.body;
+    const { carrito, datosCliente } = req.body;
 
-    const total = carrito.reduce(
-      (acc, item) => acc + item.precio * item.cantidad,
-      0
-    );
+    if (!carrito || carrito.length === 0) {
+      return res.status(400).json({ error: "Carrito vacío" });
+    }
 
-    const response = await fetch("https://api.bold.co/v1/payments", {
+    const items = carrito.map(item => ({
+      title: item.nombre,
+      quantity: Number(item.cantidad),
+      unit_price: Number(item.precio),
+      currency_id: "COP"
+    }));
+
+    const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${BOLD_API_KEY}`,
+        "Authorization": `Bearer ${MP_ACCESS_TOKEN}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        amount: total * 100,
-        currency: "COP",
-        description: "Compra tienda Kyoto",
-        reference: "pedido-" + Date.now(),
-        redirect_url: "https://tudominio.com/gracias.html"
+        items,
+        payer: {
+          name: datosCliente?.nombreCompleto || "Cliente",
+          email: datosCliente?.email || "test@test.com"
+        },
+        back_urls: {
+          success: "https://still-bar-8cb0.kyotosc-co.workers.dev/gracias.html",
+          failure: "https://still-bar-8cb0.kyotosc-co.workers.dev/error.html",
+          pending: "https://still-bar-8cb0.kyotosc-co.workers.dev/pendiente.html"
+        },
+        auto_return: "approved"
       })
     });
 
     const data = await response.json();
 
-    res.json({ urlPago: data.payment_url });
+    if (!data.init_point) {
+      console.error("Respuesta MP:", data);
+      return res.status(500).json({ error: "No se pudo crear el pago" });
+    }
+
+    res.json({ init_point: data.init_point });
 
   } catch (error) {
-    console.error("Error en pago:", error);
-    res.status(500).json({ error: "Error creando pago" });
+    console.error("Error en Mercado Pago:", error);
+    res.status(500).json({ error: "Error creando preferencia" });
   }
 });
 
