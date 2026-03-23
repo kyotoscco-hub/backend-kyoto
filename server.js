@@ -14,15 +14,12 @@ app.get("/", (req, res) => {
   res.send("Backend Kyoto con Mercado Pago 🚀");
 });
 
-// ✅ PRODUCTOS DESDE GOOGLE SHEETS (SIN TOCAR)
+// ✅ PRODUCTOS DESDE GOOGLE SHEETS
 app.get("/productos", async (req, res) => {
   try {
     const response = await fetch("https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec");
-
     const data = await response.json();
-
     res.json(data);
-
   } catch (error) {
     console.error("Error obteniendo productos:", error);
     res.status(500).json({ error: "Error obteniendo productos" });
@@ -38,6 +35,12 @@ app.post("/crear-preferencia", async (req, res) => {
       return res.status(400).json({ error: "Carrito vacío" });
     }
 
+    // Validar token
+    if (!MP_ACCESS_TOKEN) {
+      console.error("❌ MP_ACCESS_TOKEN no configurado");
+      return res.status(500).json({ error: "Token de Mercado Pago no configurado" });
+    }
+
     const items = carrito.map(item => ({
       title: item.nombre,
       quantity: Number(item.cantidad),
@@ -45,43 +48,52 @@ app.post("/crear-preferencia", async (req, res) => {
       currency_id: "COP"
     }));
 
+    // Construir payload para Mercado Pago
+    const preference = {
+      items,
+      payer: {
+        name: datosCliente?.nombreCompleto || "Cliente",
+        email: datosCliente?.email || "test@test.com"
+      },
+      back_urls: {
+        success: "https://still-bar-8cb0.kyotosc-co.workers.dev/gracias.html",
+        failure: "https://still-bar-8cb0.kyotosc-co.workers.dev/error.html",
+        pending: "https://still-bar-8cb0.kyotosc-co.workers.dev/pendiente.html"
+      },
+      auto_return: "approved"
+    };
+
+    console.log("Enviando a MP:", JSON.stringify(preference, null, 2));
+
     const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${MP_ACCESS_TOKEN}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        items,
-        payer: {
-          name: datosCliente?.nombreCompleto || "Cliente",
-          email: datosCliente?.email || "test@test.com"
-        },
-        back_urls: {
-          success: "https://still-bar-8cb0.kyotosc-co.workers.dev/gracias.html",
-          failure: "https://still-bar-8cb0.kyotosc-co.workers.dev/error.html",
-          pending: "https://still-bar-8cb0.kyotosc-co.workers.dev/pendiente.html"
-        },
-        auto_return: "approved"
-      })
+      body: JSON.stringify(preference)
     });
 
     const data = await response.json();
 
+    if (!response.ok) {
+      console.error("Error respuesta MP:", data);
+      return res.status(500).json({ error: data.message || "Error al crear preferencia", details: data });
+    }
+
     if (!data.init_point) {
-      console.error("Respuesta MP:", data);
-      return res.status(500).json({ error: "No se pudo crear el pago" });
+      console.error("No init_point en respuesta:", data);
+      return res.status(500).json({ error: "No se pudo crear el pago", details: data });
     }
 
     res.json({ init_point: data.init_point });
 
   } catch (error) {
     console.error("Error en Mercado Pago:", error);
-    res.status(500).json({ error: "Error creando preferencia" });
+    res.status(500).json({ error: "Error creando preferencia", details: error.message });
   }
 });
 
-// ✅ IMPORTANTE PARA RAILWAY
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Servidor corriendo en puerto " + PORT);
 });
