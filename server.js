@@ -29,10 +29,10 @@ const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
-// --- Cache de productos (1 minuto para que los cambios se reflejen rápido) ---
+// --- Cache de productos (5 minutos en producción, puedes ajustar) ---
 let productosCache = null;
 let cacheTimestamp = 0;
-const CACHE_DURATION = 1 * 60 * 1000; // 1 minuto (puedes aumentarlo a 5 o 10 en producción)
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos (cambia a 1*60*1000 para pruebas rápidas)
 
 async function obtenerProductos() {
   if (productosCache && Date.now() - cacheTimestamp < CACHE_DURATION) {
@@ -68,14 +68,16 @@ app.post("/crear-preferencia", async (req, res) => {
       return res.status(400).json({ error: "Carrito vacío" });
     }
 
-    // Obtener productos reales desde Google Sheets
+    // 1. Obtener productos reales desde Google Sheets
     const productosReales = await obtenerProductos();
 
-    // 🔒 Construir items con precios reales (sin validar el precio enviado)
+    // 2. Validar que todos los productos existan y usar precios reales
     const itemsValidados = [];
     for (const item of carrito) {
+      // Búsqueda insensible a mayúsculas para mayor robustez
       const productoReal = productosReales.find(p => 
-        (p.id == item.id) || (p.nombre === item.nombre)
+        (p.id == item.id) || 
+        (p.nombre && p.nombre.toLowerCase() === item.nombre.toLowerCase())
       );
       if (!productoReal) {
         return res.status(400).json({ error: `Producto no encontrado: ${item.nombre}` });
@@ -92,20 +94,20 @@ app.post("/crear-preferencia", async (req, res) => {
     // Calcular total validado
     const totalValidado = itemsValidados.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0);
 
-    // Generar referencia externa única
+    // 3. Generar referencia externa única
     const externalRef = `pedido_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
-    // Guardar pedido en memoria temporal (con precios reales)
+    // Guardar pedido en memoria temporal (con todos los datos originales, incluida talla)
     pedidosPendientes[externalRef] = {
       carrito: carrito.map((item, idx) => ({
-        ...item,
-        precio: itemsValidados[idx].unit_price   // sobreescribir con precio real
+        ...item,                              // conserva nombre, talla, cantidad, etc.
+        precio: itemsValidados[idx].unit_price // sobreescribe precio con el real
       })),
       cliente: datosCliente,
       total: totalValidado
     };
 
-    // Crear preferencia con precios reales
+    // 4. Crear preferencia con precios reales
     const preference = {
       items: itemsValidados,
       payer: {
