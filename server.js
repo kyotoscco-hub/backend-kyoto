@@ -25,7 +25,6 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
-// ✅ URL ACTUALIZADA de tu script de Google Sheets
 const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzd-aCla3jtLyy7N9nO8TvcgkCGWKkxxVXOO-dSWv8teFE_xqWXxGgLqTNxUczDJlpi/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
@@ -69,19 +68,15 @@ app.post("/crear-preferencia", async (req, res) => {
     const itemsValidados = [];
 
     for (const item of carrito) {
-      // 🔥 Buscar por id (ahora sí debe venir en la hoja)
       const productoReal = productosReales.find(p => p.id == item.id);
-
       if (!productoReal) {
         return res.status(400).json({ error: `Producto no encontrado: ${item.nombre} (id: ${item.id})` });
       }
-
       const precioReal = productoReal.precio * (1 - (productoReal.descuento || 0)/100);
-
       itemsValidados.push({
         title: `${item.nombre} - Talla ${item.talla}`,
         quantity: Number(item.cantidad),
-        unit_price: precioReal,
+        unit_price: Number(precioReal),
         currency_id: "COP"
       });
     }
@@ -129,13 +124,13 @@ app.post("/crear-preferencia", async (req, res) => {
     if (!response.ok) {
       console.error("❌ Error MP:", data);
       delete pedidosPendientes[externalRef];
-      return res.status(500).json({ error: data.message || "Error al crear preferencia" });
+      return res.status(500).json({ error: data.message || "Error al crear preferencia", details: data });
     }
 
     if (!data.init_point) {
       console.error("❌ No init_point:", data);
       delete pedidosPendientes[externalRef];
-      return res.status(500).json({ error: "No se pudo crear el pago" });
+      return res.status(500).json({ error: "No se pudo crear el pago", details: data });
     }
 
     res.json({ init_point: data.init_point });
