@@ -25,11 +25,11 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
-// ✅ URLs actualizadas con tu nuevo script
-const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzd-aCla3jtLyy7N9nO8TvcgkCGWKkxxVXOO-dSWv8teFE_xqWXxGgLqTNxUczDJlpi/exec";
+// URLs de Google Sheets (la que te funcionaba)
+const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
-// --- Caché de productos (5 minutos) ---
+// --- Cache de productos (5 minutos) ---
 let productosCache = null;
 let cacheTimestamp = 0;
 const CACHE_DURATION = 5 * 60 * 1000;
@@ -70,20 +70,24 @@ app.post("/crear-preferencia", async (req, res) => {
     const itemsValidados = [];
 
     for (const item of carrito) {
-      // 1. Buscar por ID
+      // Buscar por ID o por nombre (fallback)
       let productoReal = productosReales.find(p => p.id == item.id);
-      // 2. Si no se encuentra, buscar por nombre (insensible a mayúsculas)
       if (!productoReal) {
         productoReal = productosReales.find(p => 
           p.nombre && p.nombre.toLowerCase() === item.nombre.toLowerCase()
         );
       }
       if (!productoReal) {
-        return res.status(400).json({ error: `Producto no encontrado: ${item.nombre} (id: ${item.id})` });
+        return res.status(400).json({ error: `Producto no encontrado: ${item.nombre}` });
       }
 
       const precioReal = productoReal.precio * (1 - (productoReal.descuento || 0)/100);
+
+      // 👇 CLAVE: ID único por producto + talla para evitar fusión
+      const uniqueId = `${item.id}-${item.talla}`;
+
       itemsValidados.push({
+        id: uniqueId,                       // 👈 Campo id único
         title: `${item.nombre} - Talla ${item.talla}`,
         quantity: Number(item.cantidad),
         unit_price: precioReal,
@@ -155,17 +159,21 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
   try {
     const { type, data } = req.body;
+    console.log("📥 Webhook recibido:", { type, data });
+
     if (type === "payment") {
       const paymentId = data.id;
       const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
         headers: { "Authorization": `Bearer ${MP_ACCESS_TOKEN}` }
       });
       const payment = await response.json();
+
       if (payment.status === "approved") {
         const externalRef = payment.external_reference;
         const pedido = pedidosPendientes[externalRef];
+
         if (pedido) {
-          console.log(`✅ Pago aprobado ${externalRef}`);
+          console.log(`✅ Pago aprobado para ${externalRef}`);
           fetch(SHEETS_WEBHOOK_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -175,16 +183,24 @@ app.post("/webhook", async (req, res) => {
               carrito: pedido.carrito,
               total: pedido.total
             })
-          }).catch(err => console.error("Error guardando en Sheets:", err));
+          }).then(() => {
+            console.log(`📊 Pedido ${externalRef} guardado en Google Sheets`);
+          }).catch(err => {
+            console.error(`❌ Error guardando en Sheets: ${err.message}`);
+          });
           delete pedidosPendientes[externalRef];
+        } else {
+          console.warn(`⚠️ No se encontró pedido pendiente para ${externalRef}`);
         }
+      } else {
+        console.log(`⏳ Pago no aprobado: ${payment.status}`);
       }
     }
   } catch (error) {
-    console.error("Webhook error:", error);
+    console.error("❌ Error procesando webhook:", error);
   }
 });
 
-app.get("/", (req, res) => res.send("Backend Kyoto 🚀"));
+app.get("/", (req, res) => res.send("Backend Kyoto con Mercado Pago 🚀"));
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en puerto ${PORT}`));
