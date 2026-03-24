@@ -25,8 +25,8 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
-// URLs de Google Sheets (la que te funcionaba)
-const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec";
+// ✅ NUEVA URL de tu script de Google Sheets (con columna id)
+const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzd-aCla3jtLyy7N9nO8TvcgkCGWKkxxVXOO-dSWv8teFE_xqWXxGgLqTNxUczDJlpi/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
 // --- Cache de productos (5 minutos) ---
@@ -87,7 +87,7 @@ app.post("/crear-preferencia", async (req, res) => {
       const uniqueId = `${item.id}-${item.talla}`;
 
       itemsValidados.push({
-        id: uniqueId,                       // 👈 Campo id único
+        id: uniqueId,                       // Campo id único
         title: `${item.nombre} - Talla ${item.talla}`,
         quantity: Number(item.cantidad),
         unit_price: precioReal,
