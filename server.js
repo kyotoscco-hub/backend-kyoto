@@ -25,9 +25,11 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
+// ✅ URLs actualizadas con tu nuevo script
 const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzd-aCla3jtLyy7N9nO8TvcgkCGWKkxxVXOO-dSWv8teFE_xqWXxGgLqTNxUczDJlpi/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
+// --- Caché de productos (5 minutos) ---
 let productosCache = null;
 let cacheTimestamp = 0;
 const CACHE_DURATION = 5 * 60 * 1000;
@@ -68,15 +70,23 @@ app.post("/crear-preferencia", async (req, res) => {
     const itemsValidados = [];
 
     for (const item of carrito) {
-      const productoReal = productosReales.find(p => p.id == item.id);
+      // 1. Buscar por ID
+      let productoReal = productosReales.find(p => p.id == item.id);
+      // 2. Si no se encuentra, buscar por nombre (insensible a mayúsculas)
+      if (!productoReal) {
+        productoReal = productosReales.find(p => 
+          p.nombre && p.nombre.toLowerCase() === item.nombre.toLowerCase()
+        );
+      }
       if (!productoReal) {
         return res.status(400).json({ error: `Producto no encontrado: ${item.nombre} (id: ${item.id})` });
       }
+
       const precioReal = productoReal.precio * (1 - (productoReal.descuento || 0)/100);
       itemsValidados.push({
         title: `${item.nombre} - Talla ${item.talla}`,
         quantity: Number(item.cantidad),
-        unit_price: Number(precioReal),
+        unit_price: precioReal,
         currency_id: "COP"
       });
     }
@@ -124,13 +134,13 @@ app.post("/crear-preferencia", async (req, res) => {
     if (!response.ok) {
       console.error("❌ Error MP:", data);
       delete pedidosPendientes[externalRef];
-      return res.status(500).json({ error: data.message || "Error al crear preferencia", details: data });
+      return res.status(500).json({ error: data.message || "Error al crear preferencia" });
     }
 
     if (!data.init_point) {
       console.error("❌ No init_point:", data);
       delete pedidosPendientes[externalRef];
-      return res.status(500).json({ error: "No se pudo crear el pago", details: data });
+      return res.status(500).json({ error: "No se pudo crear el pago" });
     }
 
     res.json({ init_point: data.init_point });
@@ -165,7 +175,7 @@ app.post("/webhook", async (req, res) => {
               carrito: pedido.carrito,
               total: pedido.total
             })
-          }).catch(err => console.error("Error Sheets:", err));
+          }).catch(err => console.error("Error guardando en Sheets:", err));
           delete pedidosPendientes[externalRef];
         }
       }
