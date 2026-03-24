@@ -29,10 +29,10 @@ const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
-// --- Cache de productos (para evitar llamar a Sheets en cada creación de preferencia) ---
+// --- Cache de productos (1 minuto para que los cambios se reflejen rápido) ---
 let productosCache = null;
 let cacheTimestamp = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+const CACHE_DURATION = 1 * 60 * 1000; // 1 minuto (puedes aumentarlo a 5 o 10 en producción)
 
 async function obtenerProductos() {
   if (productosCache && Date.now() - cacheTimestamp < CACHE_DURATION) {
@@ -68,10 +68,10 @@ app.post("/crear-preferencia", async (req, res) => {
       return res.status(400).json({ error: "Carrito vacío" });
     }
 
-    // 1. Obtener productos reales desde Google Sheets
+    // Obtener productos reales desde Google Sheets
     const productosReales = await obtenerProductos();
 
-    // 2. Validar cada ítem: debe existir, precio correcto
+    // 🔒 Construir items con precios reales (sin validar el precio enviado)
     const itemsValidados = [];
     for (const item of carrito) {
       const productoReal = productosReales.find(p => 
@@ -81,11 +81,6 @@ app.post("/crear-preferencia", async (req, res) => {
         return res.status(400).json({ error: `Producto no encontrado: ${item.nombre}` });
       }
       const precioReal = productoReal.precio * (1 - (productoReal.descuento || 0)/100);
-      // Permitir una pequeña diferencia por redondeo
-      if (Math.abs(item.precio - precioReal) > 0.01) {
-        console.warn(`⚠️ Precio manipulado para ${item.nombre}: esperado ${precioReal}, recibido ${item.precio}`);
-        return res.status(400).json({ error: "Precio inválido en el carrito" });
-      }
       itemsValidados.push({
         title: item.nombre,
         quantity: Number(item.cantidad),
@@ -97,20 +92,20 @@ app.post("/crear-preferencia", async (req, res) => {
     // Calcular total validado
     const totalValidado = itemsValidados.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0);
 
-    // 3. Generar referencia externa única
+    // Generar referencia externa única
     const externalRef = `pedido_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
-    // Guardar pedido en memoria temporal
+    // Guardar pedido en memoria temporal (con precios reales)
     pedidosPendientes[externalRef] = {
-      carrito: carrito.map(item => ({
+      carrito: carrito.map((item, idx) => ({
         ...item,
-        precio: itemsValidados.find(i => i.title === item.nombre)?.unit_price || item.precio
+        precio: itemsValidados[idx].unit_price   // sobreescribir con precio real
       })),
       cliente: datosCliente,
       total: totalValidado
     };
 
-    // 4. Crear preferencia con precios validados
+    // Crear preferencia con precios reales
     const preference = {
       items: itemsValidados,
       payer: {
@@ -141,7 +136,6 @@ app.post("/crear-preferencia", async (req, res) => {
 
     if (!response.ok) {
       console.error("❌ Error MP:", data);
-      // Limpiar pedido pendiente si falla
       delete pedidosPendientes[externalRef];
       return res.status(500).json({ error: data.message || "Error al crear preferencia" });
     }
