@@ -25,7 +25,8 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
-const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec";
+// ✅ URL ACTUALIZADA de tu script de Google Sheets
+const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzd-aCla3jtLyy7N9nO8TvcgkCGWKkxxVXOO-dSWv8teFE_xqWXxGgLqTNxUczDJlpi/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
 let productosCache = null;
@@ -65,16 +66,20 @@ app.post("/crear-preferencia", async (req, res) => {
 
     const productosReales = await obtenerProductos();
 
-    // Validar y construir items con precios reales
     const itemsValidados = [];
+
     for (const item of carrito) {
+      // 🔥 Buscar por id (ahora sí debe venir en la hoja)
       const productoReal = productosReales.find(p => p.id == item.id);
+
       if (!productoReal) {
-        return res.status(400).json({ error: `Producto no encontrado: ${item.nombre}` });
+        return res.status(400).json({ error: `Producto no encontrado: ${item.nombre} (id: ${item.id})` });
       }
+
       const precioReal = productoReal.precio * (1 - (productoReal.descuento || 0)/100);
+
       itemsValidados.push({
-        title: `${item.nombre} - Talla ${item.talla}`,  // 👈 CLAVE: título con talla
+        title: `${item.nombre} - Talla ${item.talla}`,
         quantity: Number(item.cantidad),
         unit_price: precioReal,
         currency_id: "COP"
@@ -107,6 +112,8 @@ app.post("/crear-preferencia", async (req, res) => {
       auto_return: "approved",
       external_reference: externalRef
     };
+
+    console.log("📤 Enviando a MP:", JSON.stringify(preference, null, 2));
 
     const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
       method: "POST",
