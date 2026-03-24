@@ -29,10 +29,10 @@ const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
-// --- Cache de productos (5 minutos en producción, puedes ajustar) ---
+// --- Cache de productos (5 minutos) ---
 let productosCache = null;
 let cacheTimestamp = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos (cambia a 1*60*1000 para pruebas rápidas)
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
 
 async function obtenerProductos() {
   if (productosCache && Date.now() - cacheTimestamp < CACHE_DURATION) {
@@ -46,7 +46,7 @@ async function obtenerProductos() {
 }
 
 // --- Almacenamiento temporal de pedidos (en memoria) ---
-const pedidosPendientes = {}; // { externalRef: { carrito, cliente, total } }
+const pedidosPendientes = {};
 
 // --- Endpoint para obtener productos (público) ---
 app.get("/productos", async (req, res) => {
@@ -71,10 +71,9 @@ app.post("/crear-preferencia", async (req, res) => {
     // 1. Obtener productos reales desde Google Sheets
     const productosReales = await obtenerProductos();
 
-    // 2. Validar que todos los productos existan y usar precios reales
+    // 2. Validar productos y usar precios reales, además incluir talla en título
     const itemsValidados = [];
     for (const item of carrito) {
-      // Búsqueda insensible a mayúsculas para mayor robustez
       const productoReal = productosReales.find(p => 
         (p.id == item.id) || 
         (p.nombre && p.nombre.toLowerCase() === item.nombre.toLowerCase())
@@ -84,30 +83,27 @@ app.post("/crear-preferencia", async (req, res) => {
       }
       const precioReal = productoReal.precio * (1 - (productoReal.descuento || 0)/100);
       itemsValidados.push({
-        title: item.nombre,
+        title: `${item.nombre} - Talla ${item.talla}`, // 👈 AÑADIMOS LA TALLA AL TÍTULO
         quantity: Number(item.cantidad),
         unit_price: precioReal,
         currency_id: "COP"
       });
     }
 
-    // Calcular total validado
     const totalValidado = itemsValidados.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0);
-
-    // 3. Generar referencia externa única
     const externalRef = `pedido_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
-    // Guardar pedido en memoria temporal (con todos los datos originales, incluida talla)
+    // Guardar pedido en memoria temporal
     pedidosPendientes[externalRef] = {
       carrito: carrito.map((item, idx) => ({
-        ...item,                              // conserva nombre, talla, cantidad, etc.
-        precio: itemsValidados[idx].unit_price // sobreescribe precio con el real
+        ...item,
+        precio: itemsValidados[idx].unit_price
       })),
       cliente: datosCliente,
       total: totalValidado
     };
 
-    // 4. Crear preferencia con precios reales
+    // 3. Crear preferencia con precios reales y títulos diferenciados
     const preference = {
       items: itemsValidados,
       payer: {
@@ -158,7 +154,6 @@ app.post("/crear-preferencia", async (req, res) => {
 
 // --- Webhook para recibir notificaciones de pago ---
 app.post("/webhook", async (req, res) => {
-  // Responder rápido para que MP no reintente
   res.sendStatus(200);
 
   try {
@@ -179,7 +174,6 @@ app.post("/webhook", async (req, res) => {
         if (pedido) {
           console.log(`✅ Pago aprobado para ${externalRef}`);
 
-          // Enviar datos a Google Sheets (en segundo plano)
           fetch(SHEETS_WEBHOOK_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -195,7 +189,6 @@ app.post("/webhook", async (req, res) => {
             console.error(`❌ Error guardando en Sheets: ${err.message}`);
           });
 
-          // Limpiar de memoria (opcional)
           delete pedidosPendientes[externalRef];
         } else {
           console.warn(`⚠️ No se encontró pedido pendiente para ${externalRef}`);
@@ -209,8 +202,6 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// --- Endpoint raíz ---
 app.get("/", (req, res) => res.send("Backend Kyoto con Mercado Pago 🚀"));
 
-// --- Iniciar servidor ---
 app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en puerto ${PORT}`));
