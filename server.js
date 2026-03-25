@@ -4,13 +4,13 @@ import cors from "cors";
 
 const app = express();
 
-// 🔒 Restringir CORS a tus dominios (ajusta según tu frontend)
 const allowedOrigins = [
   'https://still-bar-8cb0.kyotosc-co.workers.dev',
   'https://kyotosc.co',
   'http://localhost:5500',
   'http://localhost:3000'
 ];
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -25,14 +25,12 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
-// URLs de Google Sheets
-const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzOx-uAUH3p3lM4i5VcISIYNOl_9D_gzhmv25-lf-Vq6V8NCOaJDE0i-yg7_3aYN0rW/exec";
+const PRODUCTOS_URL = "https://script.google.com/macros/s/AKfycbzd-aCla3jtLyy7N9nO8TvcgkCGWKkxxVXOO-dSWv8teFE_xqWXxGgLqTNxUczDJlpi/exec";
 const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwFlDMRWV1kJaVNcu4ouInzRPBf-vY52-Ks-91kSl4m9o7THSo-1DwAiwimsl8er_sQrQ/exec";
 
-// --- Cache de productos (5 minutos) para proteger el servidor ---
 let productosCache = null;
 let cacheTimestamp = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos. NO LO PONGAS EN 0 DURANTE EL DROP.
+const CACHE_DURATION = 5 * 60 * 1000;
 
 async function obtenerProductos() {
   if (productosCache && Date.now() - cacheTimestamp < CACHE_DURATION) {
@@ -45,10 +43,9 @@ async function obtenerProductos() {
   return data;
 }
 
-// --- Almacenamiento temporal de pedidos (en memoria) ---
-const pedidosPendientes = {};
+// Almacén de pedidos (en memoria; se pierde al reiniciar el servidor)
+const pedidosPendientes = {}; // externalRef -> datos del pedido
 
-// --- Endpoint para obtener productos (público) ---
 app.get("/productos", async (req, res) => {
   try {
     const productos = await obtenerProductos();
@@ -59,7 +56,17 @@ app.get("/productos", async (req, res) => {
   }
 });
 
-// --- Endpoint para crear preferencia (seguro) ---
+// Nuevo endpoint para obtener pedido por external_reference
+app.get("/pedido/:externalRef", (req, res) => {
+  const { externalRef } = req.params;
+  const pedido = pedidosPendientes[externalRef];
+  if (pedido) {
+    res.json(pedido);
+  } else {
+    res.status(404).json({ error: "Pedido no encontrado" });
+  }
+});
+
 app.post("/crear-preferencia", async (req, res) => {
   try {
     const { carrito, datosCliente } = req.body;
@@ -68,21 +75,27 @@ app.post("/crear-preferencia", async (req, res) => {
       return res.status(400).json({ error: "Carrito vacío" });
     }
 
-    // 1. Obtener productos reales desde Google Sheets
     const productosReales = await obtenerProductos();
 
-    // 2. Validar productos y usar precios reales, además incluir talla en título
     const itemsValidados = [];
+
     for (const item of carrito) {
-      // ✅ CORRECCIÓN: Búsqueda exacta por ID como texto para evitar errores
-      const productoReal = productosReales.find(p => String(p.id) === String(item.id));
-      
+      let productoReal = productosReales.find(p => p.id == item.id);
+      if (!productoReal) {
+        productoReal = productosReales.find(p => 
+          p.nombre && p.nombre.toLowerCase() === item.nombre.toLowerCase()
+        );
+      }
       if (!productoReal) {
         return res.status(400).json({ error: `Producto no encontrado: ${item.nombre}` });
       }
+
       const precioReal = productoReal.precio * (1 - (productoReal.descuento || 0)/100);
+      const uniqueId = `${item.id}-${item.talla}`;
+
       itemsValidados.push({
-        title: `${item.nombre} - Talla ${item.talla}`, // 👈 AÑADIMOS LA TALLA AL TÍTULO
+        id: uniqueId,
+        title: `${item.nombre} - Talla ${item.talla}`,
         quantity: Number(item.cantidad),
         unit_price: precioReal,
         currency_id: "COP"
@@ -92,17 +105,25 @@ app.post("/crear-preferencia", async (req, res) => {
     const totalValidado = itemsValidados.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0);
     const externalRef = `pedido_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
-    // Guardar pedido en memoria temporal
+    // Generar código de pedido legible
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const orderId = `KYOTO-${timestamp}-${random}`;
+
+    // Guardar pedido en memoria con externalRef como clave
     pedidosPendientes[externalRef] = {
+      orderId: orderId,
       carrito: carrito.map((item, idx) => ({
-        ...item,
+        id: item.id,
+        nombre: item.nombre,
+        talla: item.talla,
+        cantidad: item.cantidad,
         precio: itemsValidados[idx].unit_price
       })),
       cliente: datosCliente,
       total: totalValidado
     };
 
-    // 3. Crear preferencia con precios reales y títulos diferenciados
     const preference = {
       items: itemsValidados,
       payer: {
@@ -143,7 +164,8 @@ app.post("/crear-preferencia", async (req, res) => {
       return res.status(500).json({ error: "No se pudo crear el pago" });
     }
 
-    res.json({ init_point: data.init_point });
+    // Devolver también el externalRef y orderId para que el frontend los guarde
+    res.json({ init_point: data.init_point, external_reference: externalRef, orderId: orderId });
 
   } catch (error) {
     console.error("❌ Error en servidor:", error);
@@ -151,56 +173,42 @@ app.post("/crear-preferencia", async (req, res) => {
   }
 });
 
-// --- Webhook para recibir notificaciones de pago ---
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
-
   try {
     const { type, data } = req.body;
-    console.log("📥 Webhook recibido:", { type, data });
-
     if (type === "payment") {
       const paymentId = data.id;
       const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
         headers: { "Authorization": `Bearer ${MP_ACCESS_TOKEN}` }
       });
       const payment = await response.json();
-
       if (payment.status === "approved") {
         const externalRef = payment.external_reference;
         const pedido = pedidosPendientes[externalRef];
-
         if (pedido) {
-          console.log(`✅ Pago aprobado para ${externalRef}`);
-
+          console.log(`✅ Pago aprobado ${externalRef}`);
           fetch(SHEETS_WEBHOOK_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               external_reference: externalRef,
+              orderId: pedido.orderId,
               cliente: pedido.cliente,
               carrito: pedido.carrito,
               total: pedido.total
             })
-          }).then(() => {
-            console.log(`📊 Pedido ${externalRef} guardado en Google Sheets`);
-          }).catch(err => {
-            console.error(`❌ Error guardando en Sheets: ${err.message}`);
-          });
-
-          delete pedidosPendientes[externalRef];
-        } else {
-          console.warn(`⚠️ No se encontró pedido pendiente para ${externalRef}`);
+          }).catch(err => console.error("Error Sheets:", err));
+          // No eliminamos el pedido para que la página de gracias pueda consultarlo
+          // delete pedidosPendientes[externalRef];
         }
-      } else {
-        console.log(`⏳ Pago no aprobado: ${payment.status} - ${externalRef}`);
       }
     }
   } catch (error) {
-    console.error("❌ Error procesando webhook:", error);
+    console.error("Webhook error:", error);
   }
 });
 
-app.get("/", (req, res) => res.send("Backend Kyoto con Mercado Pago 🚀"));
+app.get("/", (req, res) => res.send("Backend Kyoto 🚀"));
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en puerto ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Servidor en ${PORT}`));
